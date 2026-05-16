@@ -208,12 +208,24 @@ async function validateInstanceWithServer(instance) {
             .sign(secret);
         
         // Call server
-        const response = await fetch(`${LICENSE_SERVER_URL}/validate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...requestData, signature: signature }),
-            timeout: 10000 // 10 second timeout
-        });
+       // --- START OF CORRECTED FETCH ---
+const response = await fetch(`${LICENSE_SERVER_URL}/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+        licenseKey: licenseKey, 
+        instanceName: instanceName 
+    })
+});
+
+const validationResult = await response.json();
+
+if (!response.ok) {
+    throw new Error(validationResult.message || 'License validation failed');
+}
+
+console.log("Validation successful:", validationResult);
+// --- END OF CORRECTED FETCH ---
         
         const now = new Date().toISOString();
         
@@ -442,35 +454,43 @@ ipcMain.handle('create-instance', async (event, licenseKey, instanceName) => {
             .sign(secret);
         
         // Validate license with server
-        const response = await fetch(`${LICENSE_SERVER_URL}/validate`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                ...requestData,
-                signature: signature
-            })
-        });
-        
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || 'License validation failed');
-        }
-        
-        const validationResult = await response.json();
-        
-        // If validation successful, create instance
-        // Validate the custom name
-        if (!instanceName || instanceName.trim().length === 0) {
-            throw new Error('Instance name is required');
-        }
+        // Clean version of the validation request
+// 1. Send the request to the server
+const response = await fetch("https://ghostshell-licenses-db.onrender.com/validate", {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ 
+        license_key: licenseKey, 
+        ...requestData, 
+        signature: signature 
+    })
+});
 
-        // Check if name already exists
-        const existingInstance = instances.find(i => i.name.toLowerCase() === instanceName.trim().toLowerCase());
-        if (existingInstance) {
-            throw new Error('An instance with this name already exists');
-        }
+// 2. Read the data ONCE (This is the key!)
+const validationResult = await response.json();
+
+// 3. Check if the server said something went wrong
+if (!response.ok) {
+    // We use validationResult.message because we already read the data above
+    throw new Error(validationResult.message || 'License validation failed');
+}
+
+// 4. Validate the custom name locally
+if (!instanceName || instanceName.trim().length === 0) {
+    throw new Error('Instance name is required');
+}
+
+// 5. Check if name already exists
+const existingInstance = instances.find(i => i.name.toLowerCase() === instanceName.trim().toLowerCase());
+if (existingInstance) {
+    throw new Error('An instance with this name already exists');
+}
+
+// 6. SUCCESS! 
+// Use the validationResult we already captured
+console.log("Validation successful:", validationResult);
 
         // If validation successful, create instance
         const newInstance = {
